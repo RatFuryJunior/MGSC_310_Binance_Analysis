@@ -1,0 +1,359 @@
+---
+title: "310 Final Project"
+author: "Nathaniel Cuadros, Ethan Leimel, and Ryan Welte"
+subtitle: MGSC 310
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+
+# Please leave this code chunk as is. It makes some slight formatting changes to alter the output to be more aesthetically pleasing. 
+
+library(knitr)
+
+# Change the number in set seed to your own favorite number
+set.seed(1818)
+options(width=70)
+options(scipen=99)
+
+
+# this sets text outputted in code chunks to small
+opts_chunk$set(tidy.opts=list(width.wrap=50),tidy=TRUE, size = "vsmall")  
+opts_chunk$set(message = FALSE,                                          
+               warning = FALSE,
+               # "caching" stores objects in code chunks and only rewrites if you change things
+               cache = FALSE,                               
+               # automatically downloads dependency files
+               autodep = TRUE,
+               # 
+               cache.comments = FALSE,
+               # 
+               collapse = TRUE,
+               # change fig.width and fig.height to change the code height and width by default
+               fig.width = 5.5,  
+               fig.height = 4.5,
+               fig.align='center')
+
+
+```
+
+```{r setup-2}
+
+# Always print this out before your assignment
+sessionInfo()
+getwd()
+```
+
+<!-- ### start answering your problem set here -->
+<!-- You may export your homework in either html or pdf, with the former usually being easier. 
+     To export or compile your Rmd file: click above on 'Knit' then 'Knit to HTML' -->
+<!-- Be sure to submit both your .Rmd file and the compiled .html or .pdf file for full credit -->
+
+
+```{r setup-3}
+
+# load all your libraries in this chunk 
+library('tidyverse')
+library('fs')
+library('rsample')
+library('ggplot2')
+library('dplyr')
+library('here')
+library('forcats')
+library('arrow')
+library('sjPlot')
+library('tidymodels')
+library('plotROC')
+library('coefplot')
+library('PerformanceAnalytics')
+library('rpart')       
+library('rpart.plot')
+library('yardstick')
+library('insight')
+
+# note, do not run install.packages() inside a code chunk. install them in the console outside of a code chunk. 
+```
+
+# install.packages('sjPlot')
+
+```{r}
+BTC_USDT = read_parquet(
+  file <- (here::here("final_project", "BTC-USDT.parquet")),
+  col_select = NULL,
+  as_data_frame = TRUE,
+  props = ParquetArrowReaderProperties$create()
+)
+ETH_USDT = read_parquet(
+  file <- (here::here("final_project", "ETH-USDT.parquet")),
+  col_select = NULL,
+  as_data_frame = TRUE,
+  props = ParquetArrowReaderProperties$create()
+)
+```
+
+```{r}
+print(summary(BTC_USDT))
+print(summary(ETH_USDT))
+```
+
+```{r}
+# BTCBuy
+BTC_USDT$BTC_PriceDif <-c(BTC_USDT$close - BTC_USDT$open)
+shifted = lag(BTC_USDT$BTC_PriceDif, n = 1)
+BTC_USDT$BTC_LastMinPriceDiff = shifted
+
+BTC_USDT <- BTC_USDT %>% mutate(BTCBuy = BTC_LastMinPriceDiff > 0)
+
+#ETHBuy
+ETH_USDT$ETH_PriceDif <-c(ETH_USDT$close - ETH_USDT$open)
+shifted = lag(ETH_USDT$ETH_PriceDif, n = 1)
+ETH_USDT$ETH_LastMinPriceDiff = shifted
+
+ETH_USDT <- ETH_USDT %>% mutate(ETHBuy = ETH_LastMinPriceDiff > 0)
+
+names(BTC_USDT)[1:10] <-c("BTC_Open", "BTC_High","BTC_Low","BTC_Close","BTC_Volume","BTC_QuoteAssetVolume","BTC_NumberOfTrades","BTC_TalkerBuyBaseAssetVolume","BTC_TalkerBuyQuoteAssetVolume","BTC_ETH_OpenTime")
+
+names(ETH_USDT)[1:9] <-c("ETH_Open", "ETH_High","ETH_Low","ETH_Close","ETH_Volume","ETH_QuoteAssetVolume","ETH_NumberOfTrades","ETH_TalkerBuyBaseAssetVolume","ETH_TalkerBuyQuoteAssetVolume")
+
+BTC_USDT1month = slice_tail(BTC_USDT, n = 43200) #one month
+ETH_USDT1month = slice_tail(ETH_USDT, n = 43200) #one month
+
+BTC_USDT1year = slice_tail(BTC_USDT, n = 525600) #one year
+ETH_USDT1year = slice_tail(ETH_USDT, n = 525600) #one year
+
+BTC_USDT11month = slice_head(BTC_USDT1year, n = 482400) #11 months
+ETH_USDT11month = slice_head(ETH_USDT1year, n = 482400) #11 months
+
+
+ETH_BTC_USDT11month = cbind(BTC_USDT11month, ETH_USDT11month) # training set
+ETH_BTC_USDT11month = subset(ETH_BTC_USDT11month, select = -c(open_time))
+
+ETH_BTC_USDT = cbind(BTC_USDT1month, ETH_USDT1month)  # testing set
+ETH_BTC_USDT = subset(ETH_BTC_USDT, select = -c(open_time))
+
+ETH_BTC_USDT_FULL = cbind(BTC_USDT1year, ETH_USDT1year) # full set
+#ETH_BTC_USDT_FULL = subset(ETH_BTC_USDT_FULL, select -c(open_time))
+```
+
+
+```{r}
+#print(ETH_BTC_USDT)
+print(summary(ETH_BTC_USDT))
+```
+
+```{r}
+colnames(ETH_BTC_USDT_FULL)
+```
+
+```{r}
+
+logit_fit_train <- glm(BTCBuy ~ ETH_Open + ETH_High + ETH_Low + ETH_Close
+                       + ETH_Volume + ETH_QuoteAssetVolume + ETH_NumberOfTrades 
+                       + ETH_TalkerBuyBaseAssetVolume
+                       + ETH_TalkerBuyQuoteAssetVolume,
+                  family = binomial,
+                  data = ETH_BTC_USDT11month)
+
+#--------------------------------------------------------
+# Converting logit coefficients to odds ratio
+#--------------------------------------------------------
+
+options(scipen = 9)
+summary(logit_fit_train)
+coeffs <- data.frame("Names" = find_predictors(logit_fit_train), "Coefficient values" = exp(logit_fit_train$coefficients[1:9]))
+print(coeffs)
+```
+
+
+```{r}
+
+plot <- ggplot(coeffs, aes(x = Coefficient.values, y = conditional) 
++ geom_bar(stat="count", color = "black", fill = "red") 
++ ggtitle("BTC Odds Coefficients") + labs(x = "", y = ""))
+print(plot)
+```
+
+
+```{r}
+BTCBuy_train_pred <- predict(logit_fit_train, #new_data = ETH_BTC_USDT11month,
+                  type = "response")
+
+BTCBuy_test_pred <- predict(logit_fit_train, newdata = ETH_BTC_USDT,
+                  type = "response")
+
+print(tail(BTCBuy_train_pred))
+print(tail(BTCBuy_test_pred))
+```
+
+```{r}
+results_train <- data.frame(
+  `truth` = ETH_BTC_USDT11month %>% select(BTCBuy),
+  `Class1` =  BTCBuy_train_pred,
+  `type` = rep("train",length(BTCBuy_train_pred))
+)
+
+
+results_test <- data.frame(
+  `truth` = ETH_BTC_USDT %>% select(BTCBuy),
+  `Class1` =  BTCBuy_test_pred,
+  `type` = rep("test",length(BTCBuy_test_pred))
+)
+
+results <- bind_rows(results_train, results_test)
+
+slice(results)
+```
+
+
+```{r}
+conf_mat(two_class_example, 
+         truth = truth, 
+         estimate = predicted)
+
+#results_logit <- data.frame(
+#  'truth' = as.factor(logit_fit1)
+#)
+
+results_logit <- data.frame(
+  `truth` = ETH_BTC_USDT11month$BTCBuy,
+  `Class1` =  BTCBuy_train_pred,
+  `Class2` = 1 - BTCBuy_train_pred,
+  `predicted` = as.factor(ifelse(BTCBuy_train_pred > 0.59,
+                                 "TRUE","FALSE"))
+)
+
+cm <- conf_mat(results_logit, 
+               truth = truth,
+               estimate = predicted)
+
+print(cm)
+autoplot(cm, "heatmap")
+```
+
+
+
+```{r}
+
+p <- ggplot(results_logit, 
+            aes(m = Class1, d = truth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.9,0.7,0.5,0.3,0)) +
+  theme_minimal(base_size = 14)
+
+print(p)
+calc_auc(p)
+
+roc_auc(results_logit, 
+        truth = truth, 
+        estimate = predicted)
+
+# ROC curve is a performance measurement for the classification problems at various threshold settings. ROC is a probability curve and AUC represents the degree or measure of separability. ... By analogy, the Higher the AUC, the better the model is at distinguishing between when to buy BTC and when to sell.
+```
+
+
+
+```{r}
+logit_fit_train2 <- glm(ETHBuy ~ BTC_Open + BTC_High + BTC_Low 
+                        + BTC_Close + BTC_Volume + BTC_QuoteAssetVolume 
+                        + BTC_NumberOfTrades 
+                        + BTC_TalkerBuyBaseAssetVolume 
+                        + BTC_TalkerBuyQuoteAssetVolume,
+                  family = binomial,
+                  data = ETH_BTC_USDT11month)
+
+#--------------------------------------------------------
+# Converting logit coefficients to odds ratio
+#--------------------------------------------------------
+
+options(scipen = 9)
+summary(logit_fit_train2)
+coeffs2 <- data.frame("Names" = find_predictors(logit_fit_train), "Coefficient values" = exp(logit_fit_train$coefficients[1:9]))
+print(coeffs2)
+```
+
+
+```{r}
+
+plot2 <- ggplot(coeffs2, aes(x = Coefficient.values, y = conditional) + geom_bar(stat="identity", color = "black", fill = "red") 
++ ggtitle("ETH Odds Coefficients") + labs(x = "", y = ""))
+
+print(plot2)
+
+```
+
+
+```{r}
+
+ETHBuy_train_pred <- predict(logit_fit_train2,
+                  type = "response")
+
+ETHBuy_test_pred <- predict(logit_fit_train2, newdata = ETH_BTC_USDT,
+                  type = "response")
+
+print(head(ETHBuy_train_pred))
+print(tail(ETHBuy_test_pred))
+
+```
+
+```{r}
+# Trying to split
+
+results_train2 <- data.frame(
+  `truth` = ETH_BTC_USDT11month %>% select(ETHBuy),
+  `Class1` =  ETHBuy_train_pred,
+  `type` = rep("train",length(ETHBuy_train_pred))
+)
+
+
+results_test2 <- data.frame(
+  `truth` = ETH_BTC_USDT %>% select(ETHBuy),
+  `Class1` =  ETHBuy_test_pred,
+  `type` = rep("test",length(ETHBuy_test_pred))
+)
+
+results2 <- bind_rows(results_train2, results_test2)
+
+slice(results2)
+```
+
+
+```{r}
+results_logit2 <- data.frame(
+  `truth` = ETH_BTC_USDT11month$ETHBuy,
+  `Class1` =  ETHBuy_train_pred,
+  `Class2` = 1 - ETHBuy_train_pred,
+  `predicted` = as.factor(ifelse(ETHBuy_train_pred > 0.54,
+                                 "TRUE","FALSE"))
+)
+
+cm2 <- conf_mat(results_logit2, 
+               truth = truth,
+               estimate = predicted)
+
+print(cm2)
+autoplot(cm2, "heatmap")
+```
+
+
+```{r}
+p2 <- ggplot(results_logit2, 
+            aes(m = Class1, d = truth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 14)
+print(p2)
+calc_auc(p2)
+
+roc_auc(results_logit2, 
+        truth = truth, 
+        estimate = predicted)
+
+# ROC curve is a performance measurement for the classification problems at various threshold settings. ROC is a probability curve and AUC represents the degree or measure of separability. ... By analogy, the Higher the AUC, the better the model is at distinguishing between patients with the disease and no disease
+```
+
+
