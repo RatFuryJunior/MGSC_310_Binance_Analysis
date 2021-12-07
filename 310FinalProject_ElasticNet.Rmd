@@ -1,0 +1,292 @@
+---
+title: "310 Final Project Elastic Net"
+author: "Nathaniel Cuadros, Ethan Leimel, and Ryan Welte"
+subtitle: MGSC 310
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+
+# Please leave this code chunk as is. It makes some slight formatting changes to alter the output to be more aesthetically pleasing. 
+
+library(knitr)
+
+# Change the number in set seed to your own favorite number
+set.seed(1818)
+options(width=70)
+options(scipen=99)
+
+
+# this sets text outputted in code chunks to small
+opts_chunk$set(tidy.opts=list(width.wrap=50),tidy=TRUE, size = "vsmall")  
+opts_chunk$set(message = FALSE,                                          
+               warning = FALSE,
+               # "caching" stores objects in code chunks and only rewrites if you change things
+               cache = FALSE,                               
+               # automatically downloads dependency files
+               autodep = TRUE,
+               # 
+               cache.comments = FALSE,
+               # 
+               collapse = TRUE,
+               # change fig.width and fig.height to change the code height and width by default
+               fig.width = 5.5,  
+               fig.height = 4.5,
+               fig.align='center')
+
+
+```
+
+```{r setup-2}
+
+# Always print this out before your assignment
+sessionInfo()
+getwd()
+
+```
+
+<!-- ### start answering your problem set here -->
+<!-- You may export your homework in either html or pdf, with the former usually being easier. 
+     To export or compile your Rmd file: click above on 'Knit' then 'Knit to HTML' -->
+<!-- Be sure to submit both your .Rmd file and the compiled .html or .pdf file for full credit -->
+
+
+```{r setup-3}
+
+# load all your libraries in this chunk 
+library('tidyverse')
+library('fs')
+library('rsample')
+library('ggplot2')
+library('dplyr')
+library('here')
+library('forcats')
+library('arrow')
+library('glmnet')
+library('glmnetUtils')
+library('broom')
+library('coefplot')
+library("yardstick")
+
+
+# note, do not run install.packages() inside a code chunk. install them in the console outside of a code chunk. 
+
+```
+
+
+```{r}
+BTC_USDT = read_parquet(
+  file <- "C:/Users/RatFury/Desktop/WORKERED/Junnie/MGSC 310/MGSC_310/datasets/BTC-USDT.parquet",
+  col_select = NULL,
+  as_data_frame = TRUE,
+  props = ParquetArrowReaderProperties$create()
+)
+ETH_USDT = read_parquet(
+  file <- "C:/Users/RatFury/Desktop/WORKERED/Junnie/MGSC 310/MGSC_310/datasets/ETH-USDT.parquet",
+  col_select = NULL,
+  as_data_frame = TRUE,
+  props = ParquetArrowReaderProperties$create()
+)
+```
+
+```{r}
+#print(summary(BTC_USDT))
+#print(summary(ETH_USDT))
+```
+
+```{r}
+#data cleaning:
+BTC_USDT$BTC_PriceDif <-c(BTC_USDT$close - BTC_USDT$open)
+shifted = lag(BTC_USDT$BTC_PriceDif, n = 1)
+BTC_USDT$BTC_LastMinPriceDiff = shifted
+
+BTC_USDT <- BTC_USDT %>% mutate(BTCBuy = BTC_LastMinPriceDiff > 0)
+
+ETH_USDT$ETH_PriceDif <-c(ETH_USDT$close - ETH_USDT$open)
+shifted = lag(ETH_USDT$ETH_PriceDif, n = 1)
+ETH_USDT$ETH_LastMinPriceDiff = shifted
+
+ETH_USDT <- ETH_USDT %>% mutate(ETHBuy = ETH_LastMinPriceDiff > 0)
+
+names(BTC_USDT)[1:10] <-c("BTC_Open", "BTC_High","BTC_Low","BTC_Close","BTC_Volume","BTC_QuoteAssetVolume","BTC_NumberOfTrades","BTC_TalkerBuyBaseAssetVolume","BTC_TalkerBuyQuoteAssetVolume","BTC_ETH_OpenTime")
+
+names(ETH_USDT)[1:9] <-c("ETH_Open", "ETH_High","ETH_Low","ETH_Close","ETH_Volume","ETH_QuoteAssetVolume","ETH_NumberOfTrades","ETH_TalkerBuyBaseAssetVolume","ETH_TalkerBuyQuoteAssetVolume")
+
+BTC_USDT1month = slice_tail(BTC_USDT, n = 43200) #one month
+ETH_USDT1month = slice_tail(ETH_USDT, n = 43200) #one month
+
+BTC_USDT1year = slice_tail(BTC_USDT, n = 525600) #one year
+ETH_USDT1year = slice_tail(ETH_USDT, n = 525600) #one year
+
+BTC_USDT11month = slice_head(BTC_USDT1year, n = 482400) #11 months
+ETH_USDT11month = slice_head(ETH_USDT1year, n = 482400) #11 months
+
+
+ETH_BTC_USDT11month = cbind(BTC_USDT11month, ETH_USDT11month)
+ETH_BTC_USDT11month = subset(ETH_BTC_USDT11month, select = -c(open_time))
+
+ETH_BTC_USDT = cbind(BTC_USDT1month, ETH_USDT1month)
+ETH_BTC_USDT = subset(ETH_BTC_USDT, select = -c(open_time))
+```
+
+```{r}
+#print(ETH_BTC_USDT)
+#ETH_BTC_USDT11month = scale(ETH_BTC_USDT11month, center = TRUE, scale = TRUE)
+#MAYBE SCALE???
+
+print(summary(ETH_BTC_USDT11month))
+```
+
+```{r}
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_Open, y = ETH_Open)) + geom_point(alpha = 1/10) +geom_smooth(method = lm))
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_ETH_OpenTime, y = ETH_Open)) + geom_point(alpha = 1/10) + geom_smooth())
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_ETH_OpenTime, y = BTC_Open)) + geom_point(alpha = 1/10) + geom_smooth())
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = ETH_PriceDif, y = BTC_PriceDif)) + geom_point(alpha = 1/10))
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_High-BTC_Low, y = BTC_ETH_OpenTime)) + geom_point(alpha = 1/10))
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_ETH_OpenTime, y = BTC_Volume)) + geom_point(alpha = 1/10))
+
+#print(ggplot(data = ETH_BTC_USDT, aes(x = BTC_ETH_OpenTime, y = ETH_Volume)) + geom_point(alpha = 1/10))
+
+```
+
+```{r}
+enet_mod_ETH <- cva.glmnet(ETH_PriceDif ~ BTC_Open + BTC_High + BTC_Low + BTC_Close + BTC_Volume + BTC_QuoteAssetVolume + BTC_NumberOfTrades + BTC_TalkerBuyBaseAssetVolume + BTC_TalkerBuyQuoteAssetVolume,
+                       data = ETH_BTC_USDT11month,
+                       alpha = seq(0,1, by = 0.1))
+
+enet_mod_BTC <- cva.glmnet(BTC_PriceDif ~ ETH_Open + ETH_High + ETH_Low + ETH_Close + ETH_Volume + ETH_QuoteAssetVolume + ETH_NumberOfTrades + ETH_TalkerBuyBaseAssetVolume + ETH_TalkerBuyQuoteAssetVolume,
+                       data = ETH_BTC_USDT11month,
+                       alpha = seq(0,1, by = 0.1))
+
+plot(enet_mod_ETH)
+plot(enet_mod_BTC)
+
+minlossplot(enet_mod_ETH, 
+            cv.type = "min")
+minlossplot(enet_mod_BTC, 
+            cv.type = "min")
+```
+
+```{r}
+get_alpha <- function(fit) {
+  alpha <- fit$alpha
+  error <- sapply(fit$modlist, 
+                  function(mod) {min(mod$cvm)})
+  alpha[which.min(error)]
+}
+
+get_model_params <- function(fit) {
+  alpha <- fit$alpha
+  lambdaMin <- sapply(fit$modlist, `[[`, "lambda.min")
+  lambdaSE <- sapply(fit$modlist, `[[`, "lambda.1se")
+  error <- sapply(fit$modlist, function(mod) {min(mod$cvm)})
+  best <- which.min(error)
+  data.frame(alpha = alpha[best], lambdaMin = lambdaMin[best],
+             lambdaSE = lambdaSE[best], eror = error[best])
+}
+
+
+print("Best Eth Alpha")
+best_alpha_ETH = get_alpha(enet_mod_ETH)
+print(best_alpha_ETH)
+print("Best Btc Alpha")
+best_alpha_BTC = get_alpha(enet_mod_BTC)
+print(best_alpha_BTC)
+
+
+print(get_model_params(enet_mod_ETH))
+print(get_model_params(enet_mod_BTC))
+
+
+best_mod_ETH <- enet_mod_ETH$modlist[[which(enet_mod_ETH$alpha == best_alpha_ETH)]]
+best_mod_BTC <- enet_mod_BTC$modlist[[which(enet_mod_BTC$alpha == best_alpha_BTC)]]
+
+
+```
+
+```{r}
+print("Coefs For ETH")
+print(coef(best_mod_ETH))
+print("Coefs For BTC")
+print(coef(best_mod_BTC))
+
+print(plot(best_mod_ETH))
+print(plot(best_mod_BTC))
+
+print(coefpath(best_mod_ETH))
+print(coefpath(best_mod_BTC))
+```
+
+```{r}
+varsBTC <- c('BTC_Open', 'BTC_High', 'BTC_Low', 'BTC_Close', 'BTC_Volume', 'BTC_QuoteAssetVolume', 'BTC_NumberOfTrades','BTC_TalkerBuyBaseAssetVolume', 'BTC_TalkerBuyQuoteAssetVolume')
+BTC_USDT1monthX = BTC_USDT1month[varsBTC]
+BTC_USDT11monthX = BTC_USDT11month[varsBTC]
+BTC_USDT1monthY = BTC_USDT1month['BTC_PriceDif']
+BTC_USDT11monthY = BTC_USDT11month['BTC_PriceDif']
+
+
+varsETH <- c('ETH_Open', 'ETH_High', 'ETH_Low', 'ETH_Close', 'ETH_Volume', 'ETH_QuoteAssetVolume', 'ETH_NumberOfTrades', 'ETH_TalkerBuyBaseAssetVolume', 'ETH_TalkerBuyQuoteAssetVolume')
+ETH_USDT1monthX = ETH_USDT1month[varsETH]
+ETH_USDT11monthX = ETH_USDT11month[varsETH]
+ETH_USDT1monthY = ETH_USDT1month['ETH_PriceDif']
+ETH_USDT11monthY = ETH_USDT11month['ETH_PriceDif']
+
+#preds test
+EthPreds1month = predict(enet_mod_ETH, BTC_USDT1monthX, alpha = best_alpha_ETH)
+BtcPreds1month = predict(enet_mod_BTC, ETH_USDT1monthX, alpha = best_alpha_BTC)
+#preds train
+EthPreds11month = predict(enet_mod_ETH, BTC_USDT11monthX, alpha = best_alpha_ETH)
+BtcPreds11month = predict(enet_mod_BTC, ETH_USDT11monthX, alpha = best_alpha_BTC)
+
+BTC_USDT1monthY$pred <- BtcPreds1month
+ETH_USDT1monthY$pred <- EthPreds1month
+
+BTC_USDT11monthY$pred <- BtcPreds11month
+ETH_USDT11monthY$pred <- EthPreds11month
+
+#SUMMARY STATS
+
+print("Test MSE")
+print("BTC")
+print(mae(BTC_USDT1monthY,BTC_PriceDif ,as.numeric(pred))$.estimate)
+print("ETH")
+print(mae(ETH_USDT1monthY,ETH_PriceDif ,as.numeric(pred))$.estimate)
+print("Test RSQ")
+print("BTC")
+print(rsq(BTC_USDT1monthY,BTC_PriceDif ,as.numeric(pred))$.estimate)
+print("ETH")
+print(rsq(ETH_USDT1monthY,ETH_PriceDif ,as.numeric(pred))$.estimate)
+
+print("Train MSE")
+print("BTC")
+print(mae(BTC_USDT11monthY,BTC_PriceDif ,as.numeric(pred))$.estimate)
+print("ETH")
+print(mae(ETH_USDT11monthY,ETH_PriceDif ,as.numeric(pred))$.estimate)
+print("Train RSQ")
+print("BTC")
+print(rsq(BTC_USDT11monthY,BTC_PriceDif ,as.numeric(pred))$.estimate)
+print("ETH")
+print(rsq(ETH_USDT11monthY,ETH_PriceDif ,as.numeric(pred))$.estimate)
+
+print("1 month")
+print("BTC")
+print(summary(BTC_USDT1monthY))
+print("ETH")
+(summary(ETH_USDT1monthY))
+print("11 months")
+print("BTC")
+print(summary(BTC_USDT11monthY))
+print("ETH")
+print(summary(ETH_USDT11monthY))
+```
+
+
