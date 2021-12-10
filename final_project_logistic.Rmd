@@ -73,6 +73,7 @@ library('rpart')
 library('rpart.plot')
 library('yardstick')
 library('insight')
+library('caret')
 
 # note, do not run install.packages() inside a code chunk. install them in the console outside of a code chunk. 
 ```
@@ -150,114 +151,151 @@ colnames(ETH_BTC_USDT_FULL)
 
 ```{r}
 
-logit_fit_train <- glm(BTCBuy ~ ETH_Open + ETH_High + ETH_Low + ETH_Close
+logit_fit_full <- glm(BTCBuy ~ ETH_Open + ETH_High + ETH_Low + ETH_Close
+                       + ETH_Volume + ETH_QuoteAssetVolume + ETH_NumberOfTrades 
+                       + ETH_TalkerBuyBaseAssetVolume
+                       + ETH_TalkerBuyQuoteAssetVolume,
+                  family = binomial,
+                  data = ETH_BTC_USDT_FULL)
+
+options(scipen = 9)
+summary(logit_fit_train)
+coeffs_exp = exp(logit_fit_train$coefficients)
+print(coeffs_exp)
+```
+
+```{r}
+BTC_logit_fit_train <- glm(BTCBuy ~ ETH_Open + ETH_High + ETH_Low + ETH_Close
                        + ETH_Volume + ETH_QuoteAssetVolume + ETH_NumberOfTrades 
                        + ETH_TalkerBuyBaseAssetVolume
                        + ETH_TalkerBuyQuoteAssetVolume,
                   family = binomial,
                   data = ETH_BTC_USDT11month)
+```
 
-#--------------------------------------------------------
-# Converting logit coefficients to odds ratio
-#--------------------------------------------------------
-
+```{r}
 options(scipen = 9)
 summary(logit_fit_train)
-coeffs <- data.frame("Names" = find_predictors(logit_fit_train), "Coefficient values" = exp(logit_fit_train$coefficients[1:9]))
-print(coeffs)
+```
+
+```{r}
+tidy(BTC_logit_fit_train)
+```
+
+```{r}
+BTC_coeffs_exp = exp(BTC_logit_fit_train$coefficients)
+print(BTC_coeffs_exp)
+
+BTC_coef_df <- data.frame("Coefficients" = BTC_coeffs_exp)
+```
+
+```{r}
+ggplot(BTC_coef_df, aes(x = BTC_coeffs_exp, y = factor(Coefficients)))+geom_bar(stat = "identity", fill = "red", color = "black") + theme_minimal()
 ```
 
 
 ```{r}
-
-plot <- ggplot(coeffs, aes(x = Coefficient.values, y = conditional) 
-+ geom_bar(stat="count", color = "black", fill = "red") 
-+ ggtitle("BTC Odds Coefficients") + labs(x = "", y = ""))
-print(plot)
-```
-
-
-```{r}
-BTCBuy_train_pred <- predict(logit_fit_train, #new_data = ETH_BTC_USDT11month,
+BTCBuy_train_pred <- predict(logit_fit_train, new_data = ETH_BTC_USDT11month,
                   type = "response")
 
 BTCBuy_test_pred <- predict(logit_fit_train, newdata = ETH_BTC_USDT,
                   type = "response")
-
-print(tail(BTCBuy_train_pred))
-print(tail(BTCBuy_test_pred))
 ```
 
 ```{r}
-results_train <- data.frame(
-  `truth` = ETH_BTC_USDT11month %>% select(BTCBuy),
-  `Class1` =  BTCBuy_train_pred,
-  `type` = rep("train",length(BTCBuy_train_pred))
-)
-
-
-results_test <- data.frame(
-  `truth` = ETH_BTC_USDT %>% select(BTCBuy),
+BTC_results_logit_test <- data.frame(
+  `truth` = ETH_BTC_USDT$BTCBuy,
   `Class1` =  BTCBuy_test_pred,
-  `type` = rep("test",length(BTCBuy_test_pred))
-)
-
-results <- bind_rows(results_train, results_test)
-
-slice(results)
-```
-
-
-```{r}
-conf_mat(two_class_example, 
-         truth = truth, 
-         estimate = predicted)
-
-#results_logit <- data.frame(
-#  'truth' = as.factor(logit_fit1)
-#)
-
-results_logit <- data.frame(
-  `truth` = ETH_BTC_USDT11month$BTCBuy,
-  `Class1` =  BTCBuy_train_pred,
-  `Class2` = 1 - BTCBuy_train_pred,
-  `predicted` = as.factor(ifelse(BTCBuy_train_pred > 0.59,
+  `Class2` = 1 - BTCBuy_test_pred,
+  `predicted` = as.factor(ifelse(BTCBuy_test_pred > 0.54,
                                  "TRUE","FALSE"))
 )
 
-cm <- conf_mat(results_logit, 
+BTC_cm_test <- conf_mat(results_logit_test, 
                truth = truth,
                estimate = predicted)
 
-print(cm)
-autoplot(cm, "heatmap")
+print(BTC_cm_test)
+autoplot(BTC_cm_test, "heatmap")
 ```
 
-
-
 ```{r}
-
-p <- ggplot(results_logit, 
+p_test <- ggplot(BTC_results_logit_test, 
             aes(m = Class1, d = truth)) + 
   geom_roc(labelsize = 3.5, 
            cutoffs.at = 
              c(0.9,0.7,0.5,0.3,0)) +
   theme_minimal(base_size = 14)
 
-print(p)
-calc_auc(p)
+print(p_test)
+calc_auc(p_test)
 
-roc_auc(results_logit, 
+roc_auc(BTC_results_logit_test, 
         truth = truth, 
         estimate = predicted)
-
-# ROC curve is a performance measurement for the classification problems at various threshold settings. ROC is a probability curve and AUC represents the degree or measure of separability. ... By analogy, the Higher the AUC, the better the model is at distinguishing between when to buy BTC and when to sell.
 ```
 
 
+```{r}
+BTC_results_logit_train <- data.frame(
+  `truth` = ETH_BTC_USDT11month$BTCBuy,
+  `Class1` =  BTCBuy_train_pred,
+  `Class2` = 1 - BTCBuy_train_pred,
+  `predicted` = as.factor(ifelse(BTCBuy_train_pred > 0.59, # threshold chosen from ROC curve below
+                                 "TRUE","FALSE"))
+)
+
+BTC_cm_train <- conf_mat(BTC_results_logit_train, 
+               truth = truth,
+               estimate = predicted)
+
+print(BTC_cm_train)
+autoplot(BTC_cm_train, "heatmap")
+```
+
 
 ```{r}
-logit_fit_train2 <- glm(ETHBuy ~ BTC_Open + BTC_High + BTC_Low 
+p_train <- ggplot(BTC_results_logit_train, 
+            aes(m = Class1, d = truth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.9,0.7,0.5,0.3,0)) +
+  theme_minimal(base_size = 14)
+
+print(p_train)
+calc_auc(p_train)
+
+roc_auc(BTC_results_logit_train, 
+        truth = truth, 
+        estimate = predicted)
+```
+
+
+```{r}
+# Accuracy
+
+# MSE
+
+get_rmse <- function(true, predictions){
+  sqrt(mean((true - predictions)^2))
+}
+
+print(get_rmse(ETH_BTC_USDT11month$BTCBuy, BTCBuy_train_pred)) 
+print(get_rmse(ETH_BTC_USDT$BTCBuy, BTCBuy_test_pred))
+
+# MAE
+get_mae <- function(true, predictions){
+  mean(abs(true - predictions))
+}
+
+print(get_mae(ETH_BTC_USDT$BTCBuy, BTCBuy_test_pred))
+print(get_mae(ETH_BTC_USDT11month$BTCBuy, BTCBuy_train_pred))
+```
+
+ETHEREUM
+
+```{r}
+ETH_logit_fit_train <- glm(ETHBuy ~ BTC_Open + BTC_High + BTC_Low 
                         + BTC_Close + BTC_Volume + BTC_QuoteAssetVolume 
                         + BTC_NumberOfTrades 
                         + BTC_TalkerBuyBaseAssetVolume 
@@ -265,95 +303,113 @@ logit_fit_train2 <- glm(ETHBuy ~ BTC_Open + BTC_High + BTC_Low
                   family = binomial,
                   data = ETH_BTC_USDT11month)
 
-#--------------------------------------------------------
-# Converting logit coefficients to odds ratio
-#--------------------------------------------------------
-
 options(scipen = 9)
-summary(logit_fit_train2)
-coeffs2 <- data.frame("Names" = find_predictors(logit_fit_train), "Coefficient values" = exp(logit_fit_train$coefficients[1:9]))
-print(coeffs2)
+summary(ETH_logit_fit_train)
+
+ETH_coeffs_exp = exp(ETH_logit_fit_train$coefficients)
+print(ETH_coeffs_exp)
+
+ETH_coef_df <- data.frame("Coefficients" = ETH_coeffs_exp)
+```
+
+```{r}
+ggplot(ETH_coef_df, aes(x = ETH_coeffs_exp, y = factor(Coefficients)))+geom_bar(stat = "identity", fill = "red", color = "black") + theme_minimal()
 ```
 
 
 ```{r}
-
-plot2 <- ggplot(coeffs2, aes(x = Coefficient.values, y = conditional) + geom_bar(stat="identity", color = "black", fill = "red") 
-+ ggtitle("ETH Odds Coefficients") + labs(x = "", y = ""))
-
-print(plot2)
-
-```
-
-
-```{r}
-
-ETHBuy_train_pred <- predict(logit_fit_train2,
+ETHBuy_train_pred <- predict(ETH_logit_fit_train, newdata = ETH_BTC_USDT11month,
                   type = "response")
 
-ETHBuy_test_pred <- predict(logit_fit_train2, newdata = ETH_BTC_USDT,
+ETHBuy_test_pred <- predict(ETH_logit_fit_train, newdata = ETH_BTC_USDT,
                   type = "response")
-
-print(head(ETHBuy_train_pred))
-print(tail(ETHBuy_test_pred))
-
 ```
 
 ```{r}
-# Trying to split
-
-results_train2 <- data.frame(
-  `truth` = ETH_BTC_USDT11month %>% select(ETHBuy),
-  `Class1` =  ETHBuy_train_pred,
-  `type` = rep("train",length(ETHBuy_train_pred))
-)
-
-
-results_test2 <- data.frame(
-  `truth` = ETH_BTC_USDT %>% select(ETHBuy),
+ETH_results_logit_test <- data.frame(
+  `truth` = ETH_BTC_USDT$BTCBuy,
   `Class1` =  ETHBuy_test_pred,
-  `type` = rep("test",length(ETHBuy_test_pred))
-)
-
-results2 <- bind_rows(results_train2, results_test2)
-
-slice(results2)
-```
-
-
-```{r}
-results_logit2 <- data.frame(
-  `truth` = ETH_BTC_USDT11month$ETHBuy,
-  `Class1` =  ETHBuy_train_pred,
-  `Class2` = 1 - ETHBuy_train_pred,
-  `predicted` = as.factor(ifelse(ETHBuy_train_pred > 0.54,
+  `Class2` = 1 - ETHBuy_test_pred,
+  `predicted` = as.factor(ifelse(ETHBuy_test_pred > 0.56,
                                  "TRUE","FALSE"))
 )
 
-cm2 <- conf_mat(results_logit2, 
+ETH_cm_test <- conf_mat(ETH_results_logit_test, 
                truth = truth,
                estimate = predicted)
 
-print(cm2)
-autoplot(cm2, "heatmap")
+print(ETH_cm_test)
+autoplot(ETH_cm_test, "heatmap")
+```
+
+```{r}
+ETH_p_test <- ggplot(ETH_results_logit_test, 
+            aes(m = Class1, d = truth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.9,0.7,0.5,0.3,0)) +
+  theme_minimal(base_size = 14)
+
+print(ETH_p_test)
+calc_auc(ETH_p_test)
+
+roc_auc(ETH_results_logit_test, 
+        truth = truth, 
+        estimate = predicted)
 ```
 
 
 ```{r}
-p2 <- ggplot(results_logit2, 
+ETH_results_logit_train <- data.frame(
+  `truth` = ETH_BTC_USDT11month$BTCBuy,
+  `Class1` =  ETHBuy_train_pred,
+  `Class2` = 1 - ETHBuy_train_pred,
+  `predicted` = as.factor(ifelse(ETHBuy_train_pred > 0.56,
+                                 "TRUE","FALSE"))
+)
+
+ETH_cm_train <- conf_mat(ETH_results_logit_train, 
+               truth = truth,
+               estimate = predicted)
+
+print(ETH_cm_train)
+autoplot(ETH_cm_train, "heatmap")
+```
+
+```{r}
+ETH_p_train <- ggplot(ETH_results_logit_train, 
             aes(m = Class1, d = truth)) + 
   geom_roc(labelsize = 3.5, 
            cutoffs.at = 
-             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+             c(0.9,0.7,0.5,0.3,0)) +
   theme_minimal(base_size = 14)
-print(p2)
-calc_auc(p2)
 
-roc_auc(results_logit2, 
+print(ETH_p_train)
+calc_auc(ETH_p_train)
+
+roc_auc(ETH_results_logit_train, 
         truth = truth, 
         estimate = predicted)
-
-# ROC curve is a performance measurement for the classification problems at various threshold settings. ROC is a probability curve and AUC represents the degree or measure of separability. ... By analogy, the Higher the AUC, the better the model is at distinguishing between patients with the disease and no disease
 ```
 
+```{r}
+# Accuracy
+
+# MSE
+
+get_rmse <- function(true, predictions){
+  sqrt(mean((true - predictions)^2))
+}
+
+print(get_rmse(ETH_BTC_USDT11month$BTCBuy, ETHBuy_train_pred)) 
+print(get_rmse(ETH_BTC_USDT$BTCBuy, ETHBuy_test_pred))
+
+# MAE
+get_mae <- function(true, predictions){
+  mean(abs(true - predictions))
+}
+
+print(get_mae(ETH_BTC_USDT$BTCBuy, ETHBuy_test_pred))
+print(get_mae(ETH_BTC_USDT11month$BTCBuy, ETHBuy_train_pred))
+```
 
