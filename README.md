@@ -25,7 +25,7 @@ The data comes from the following kaggle set: https://github.com/RatFuryJunior/M
 Contents wise there are three R markdown files coresponding to three questions:
 
 1: Since we have split the dataset into an 11-month period followed by a 1-month, can we gain any valuable correlation or predictive insight from a simple regression analysis based on variables we think are relevant to price? Ryan Welte
-FinalRW.Rmd
+RWFINALTOSUBMIT.Rmd
 
 2: Is it possible to predict the minute change of the other crypto pair given information solely of the other? EX: Predict BTC based on only ETH data? Nathaniel Cuadros
 310FinalProject_ElasticNet.Rmd
