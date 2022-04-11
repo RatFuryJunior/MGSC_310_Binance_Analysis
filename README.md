@@ -14,13 +14,13 @@ Contents:
   BinanceSummaryStats310FinalProject.html
 
 References:
-  used https://github.com/RatFuryJunior/MGSC_310_Binance_Analysis
+Used data fromhttps://www.kaggle.com/jorijnsmit/binance-full-history
 
 Description:
 Final Project for MGSC 310: Nathan Cuadros, Ryan Welte, and Ethan Leimel. 
 
 This is a Anaylisis of Candlestick data between BTC V USDT and ETH V USDT. For details of methods see presentation.
-The data comes from the following kaggle set: https://github.com/RatFuryJunior/MGSC_310_Binance_Analysis
+The data comes from the following kaggle set: https://www.kaggle.com/jorijnsmit/binance-full-history
 
 Contents wise there are three R markdown files coresponding to three questions:
 
